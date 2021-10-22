@@ -1,0 +1,17 @@
+//////////////////////////////////////////////////////////////////////////////
+//
+//  Version information for simple.rc.
+//
+//  Microsoft Research Detours Package
+//
+//  Copyright (c) Microsoft Corporation.  All rights reserved.
+//
+
+#include "detver.h"
+
+#define VER_INTERNALNAME_STR        "mstscex"
+#define VER_ORIGINALFILENAME_STR    "mstscex.dll"
+#define VER_FILEDESCRIPTION_STR     "mstsc extensions"
+#define VER_COMPANYNAME_STR         "Devolutions"
+
+#include "common.ver"
