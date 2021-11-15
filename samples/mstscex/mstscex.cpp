@@ -24,6 +24,10 @@
 #include <windows.h>
 #include <ws2tcpip.h>
 
+#define SECURITY_WIN32
+#include <sspi.h>
+#include <security.h>
+
 #include "detours.h"
 
 static FILE* g_LogFile = NULL;
@@ -189,6 +193,117 @@ INT WINAPI Hook_GetAddrInfoW(PCWSTR pNodeNameW, PCWSTR pServiceName,
     return status;
 }
 
+HMODULE (WINAPI * Real_LoadLibraryA)(LPCSTR lpLibFileName) = LoadLibraryA;
+
+HMODULE Hook_LoadLibraryA(LPCSTR lpLibFileName)
+{
+    HMODULE hModule;
+
+    fprintf(g_LogFile, "LoadLibraryA: %s\n", lpLibFileName);
+
+    hModule = Real_LoadLibraryA(lpLibFileName);
+
+    return hModule;
+}
+
+HMODULE (WINAPI * Real_LoadLibraryW)(LPCWSTR lpLibFileName) = LoadLibraryW;
+
+HMODULE Hook_LoadLibraryW(LPCWSTR lpLibFileName)
+{
+    HMODULE hModule;
+    char* lpLibFileNameA = NULL;
+    ConvertFromUnicode(CP_UTF8, 0, lpLibFileName, -1, &lpLibFileNameA, 0, NULL, NULL);
+
+    fprintf(g_LogFile, "LoadLibraryW: %s\n", lpLibFileNameA);
+
+    if (strstr(lpLibFileNameA, "mstscax.dll")) {
+        fprintf(g_LogFile, "LoadLibraryW: loading rdclientax.dll instead\n");
+        lpLibFileNameA = _strdup("C:\\Users\\mamoreau\\Documents\\Reversing\\msrdc\\rdclientax.dll");
+        hModule = Real_LoadLibraryA(lpLibFileNameA);
+    } else {
+        hModule = Real_LoadLibraryW(lpLibFileName);
+    }
+
+    free(lpLibFileNameA);
+
+    return hModule;
+}
+
+HMODULE (WINAPI * Real_LoadLibraryExA)(LPCSTR lpLibFileName, HANDLE hFile, DWORD dwFlags) = LoadLibraryExA;
+
+HMODULE Hook_LoadLibraryExA(LPCSTR lpLibFileName, HANDLE hFile, DWORD dwFlags)
+{
+    HMODULE hModule;
+
+    fprintf(g_LogFile, "LoadLibraryExA: %s\n", lpLibFileName);
+
+    hModule = Real_LoadLibraryExA(lpLibFileName, hFile, dwFlags);
+    
+    return hModule;
+}
+
+HMODULE (WINAPI * Real_LoadLibraryExW)(LPCWSTR lpLibFileName, HANDLE hFile, DWORD dwFlags) = LoadLibraryExW;
+
+HMODULE Hook_LoadLibraryExW(LPCWSTR lpLibFileName, HANDLE hFile, DWORD dwFlags)
+{
+    HMODULE hModule;
+    char* lpLibFileNameA = NULL;
+    ConvertFromUnicode(CP_UTF8, 0, lpLibFileName, -1, &lpLibFileNameA, 0, NULL, NULL);
+
+    fprintf(g_LogFile, "LoadLibraryExW: %s\n", lpLibFileNameA);
+
+    if (strstr(lpLibFileNameA, "mstscax.dll")) {
+        fprintf(g_LogFile, "LoadLibraryExW: loading rdclientax.dll instead\n");
+        lpLibFileNameA = _strdup("C:\\Users\\mamoreau\\Documents\\Reversing\\msrdc\\rdclientax.dll");
+        hModule = Real_LoadLibraryExA(lpLibFileNameA, hFile, dwFlags);
+    } else {
+        hModule = Real_LoadLibraryExW(lpLibFileName, hFile, dwFlags);
+    }
+
+    free(lpLibFileNameA);
+
+    return hModule;
+}
+
+LSTATUS (WINAPI * Real_RegQueryValueExW)(HKEY hKey, LPCWSTR lpValueName,
+    LPDWORD lpReserved, LPDWORD lpType, LPBYTE lpData, LPDWORD lpcbData) = RegQueryValueExW;
+
+LSTATUS Hook_RegQueryValueExW(HKEY hKey, LPCWSTR lpValueName,
+    LPDWORD lpReserved, LPDWORD lpType, LPBYTE lpData, LPDWORD lpcbData)
+{
+    LSTATUS status;
+
+    status = Real_RegQueryValueExW(hKey, lpValueName, lpReserved, lpType, lpData, lpcbData);
+
+    if ((status == ERROR_SUCCESS) && lpType && lpData) {
+        fprintf(g_LogFile, "RegQueryValueExW! %d\n", (int) *lpType);
+        if ((*lpType == REG_EXPAND_SZ) || (*lpType == REG_SZ) || (*lpType == 0)) {
+
+            WCHAR* regValueW = (WCHAR*) lpData;
+            char* regValueA = NULL;
+            ConvertFromUnicode(CP_UTF8, 0, regValueW, -1, &regValueA, 0, NULL, NULL);
+
+            if (strstr(regValueA, "mstscax.dll")) {
+                //fprintf(g_LogFile, "RegQueryValueExW: -> %s\n", regValueA);
+            }
+
+            free(regValueA);
+        }
+    }
+
+    return status;
+}
+
+PSecurityFunctionTableW (SEC_ENTRY * Real_InitSecurityInterfaceW)(void) = InitSecurityInterfaceW;
+
+PSecurityFunctionTableW SEC_ENTRY Hook_InitSecurityInterfaceW(void)
+{
+    PSecurityFunctionTableW pTable = NULL;
+    fprintf(g_LogFile, "InitSecurityInterfaceW\n");
+    pTable = Real_InitSecurityInterfaceW();
+    return pTable;
+}
+
 BOOL WINAPI DllMain(HINSTANCE hinst, DWORD dwReason, LPVOID reserved)
 {
     LONG error;
@@ -207,6 +322,12 @@ BOOL WINAPI DllMain(HINSTANCE hinst, DWORD dwReason, LPVOID reserved)
         DetourUpdateThread(GetCurrentThread());
         DetourAttach(&(PVOID&)Real_GetAddrInfoExW, Hook_GetAddrInfoExW);
         DetourAttach(&(PVOID&)Real_GetAddrInfoW, Hook_GetAddrInfoW);
+        DetourAttach(&(PVOID&)Real_LoadLibraryA, Hook_LoadLibraryA);
+        DetourAttach(&(PVOID&)Real_LoadLibraryW, Hook_LoadLibraryW);
+        DetourAttach(&(PVOID&)Real_LoadLibraryExA, Hook_LoadLibraryExA);
+        DetourAttach(&(PVOID&)Real_LoadLibraryExW, Hook_LoadLibraryExW);
+        DetourAttach(&(PVOID&)Real_RegQueryValueExW, Hook_RegQueryValueExW);
+        DetourAttach(&(PVOID&)Real_InitSecurityInterfaceW, Hook_InitSecurityInterfaceW);
         error = DetourTransactionCommit();
     }
     else if (dwReason == DLL_PROCESS_DETACH) {
@@ -214,6 +335,12 @@ BOOL WINAPI DllMain(HINSTANCE hinst, DWORD dwReason, LPVOID reserved)
         DetourUpdateThread(GetCurrentThread());
         DetourDetach(&(PVOID&)Real_GetAddrInfoExW, Hook_GetAddrInfoExW);
         DetourDetach(&(PVOID&)Real_GetAddrInfoW, Hook_GetAddrInfoW);
+        DetourDetach(&(PVOID&)Real_LoadLibraryA, Hook_LoadLibraryA);
+        DetourDetach(&(PVOID&)Real_LoadLibraryW, Hook_LoadLibraryW);
+        DetourDetach(&(PVOID&)Real_LoadLibraryExA, Hook_LoadLibraryExA);
+        DetourDetach(&(PVOID&)Real_LoadLibraryExW, Hook_LoadLibraryExW);
+        DetourDetach(&(PVOID&)Real_RegQueryValueExW, Hook_RegQueryValueExW);
+        DetourDetach(&(PVOID&)Real_InitSecurityInterfaceW, Hook_InitSecurityInterfaceW);
         
         error = DetourTransactionCommit();
         CloseLog();
