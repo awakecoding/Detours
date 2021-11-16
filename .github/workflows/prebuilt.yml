@@ -47,7 +47,14 @@ jobs:
         working-directory: detours
         run: |
           $PkgDir = "detours-${{matrix.version}}-${{matrix.arch}}"
+          $LibDir = Get-ChildItem "lib.*" -Name
           New-Item -ItemType Directory -Path $PkgDir | Out-Null
-          Move-Item "./include" -Destination $PkgDir -Recurse
-          Move-Item "./lib.*" -Destination $PkgDir -Recurse
-          Get-ChildItem $PkgDir -Recurse
+          Move-Item "include" -Destination $PkgDir
+          Move-Item $LibDir -Destination "$PkgDir/lib"
+          & "7z" "a" "-tzip" "../${PkgDir}.zip" $PkgDir
+
+      - name: Upload Detours
+        uses: actions/upload-artifact@v2
+        with:
+          name: detours-${{matrix.version}}-${{matrix.arch}}
+          path: detours-${{matrix.version}}-${{matrix.arch}}.zip
