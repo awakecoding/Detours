@@ -27,7 +27,8 @@ jobs:
     steps:
       - name: Clone Detours
         uses: actions/checkout@v2
-        path: detours
+        with:
+          path: detours
 
       - name: Configure MSVC environment
         uses: ilammy/msvc-dev-cmd@v1
